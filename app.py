@@ -1,4 +1,8 @@
 import streamlit as st
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+from datetime import datetime
 
 st.set_page_config(page_title="Role Assessment", page_icon="📝")
 
@@ -52,5 +56,22 @@ for idx, (q, mapping, weight) in enumerate(questions, start=1):
             role_scores[role] += score * weight
 
 if st.button("Submit"):
+
+    # Pick best role
     best_role = max(role_scores.items(), key=lambda x: x[1])[0]
     st.success(f"🎉 {name}, your best-fit role is: **{best_role}**")
+
+    # Save result to Google Sheets
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            st.secrets["google_service_account"], scope
+        )
+        client = gspread.authorize(creds)
+
+        sheet = client.open("Role_Assessment_Results").sheet1  # Make sure sheet exists
+        sheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, best_role])
+
+        st.info("✅ Your response was saved to Google Sheets!")
+    except Exception as e:
+        st.error(f"⚠️ Could not save to Google Sheets: {e}")
