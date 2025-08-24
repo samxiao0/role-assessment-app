@@ -4,24 +4,37 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 from datetime import datetime
 
+# --------------------
+# Page Setup
+# --------------------
 st.set_page_config(page_title="Role Assessment", page_icon="📝")
-
 st.title("📝 Student Association Role Assessment")
 st.write("Answer the questions to find your best fit role.")
 
-# ========================
+# --------------------
 # Google Sheets Setup
-# ========================
+# --------------------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(
-    st.secrets["google_service_account"], scope
-)
-client = gspread.authorize(creds)
-sheet = client.open("Role_Assessment_Results").sheet1
 
-# ========================
+# Safe access to Google credentials
+google_creds = st.secrets.get("google_service_account")
+if google_creds is None:
+    st.error("⚠️ Google service account not set in Streamlit Secrets!")
+    st.stop()
+
+creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
+client = gspread.authorize(creds)
+
+# Open your sheet
+try:
+    sheet = client.open("Role_Assessment_Results").sheet1
+except Exception as e:
+    st.error(f"⚠️ Could not access Google Sheet: {e}")
+    st.stop()
+
+# --------------------
 # Roles dictionary
-# ========================
+# --------------------
 role_scores = {
     "Secretary": 0,
     "Joint Secretary": 0,
@@ -33,9 +46,9 @@ role_scores = {
     "Vice President": 0
 }
 
-# ========================
+# --------------------
 # Questions list
-# ========================
+# --------------------
 questions = [
     ("Do you enjoy writing meeting notes and official emails?", {"y": {"Secretary": 3}}, 3),
     ("Are you detail-oriented and good with documentation?", {"y": {"Joint Secretary": 3, "Secretary": 1}}, 3),
@@ -58,9 +71,9 @@ questions = [
     ("Do you see yourself as a leader who inspires others?", {"y": {"Vice President": 3}}, 3)
 ]
 
-# ========================
+# --------------------
 # User Input
-# ========================
+# --------------------
 name = st.text_input("Enter your name:")
 
 answers = {}
@@ -71,15 +84,17 @@ for idx, (q, mapping, weight) in enumerate(questions, start=1):
         for role, score in mapping[ans.lower()].items():
             role_scores[role] += score * weight
 
-# ========================
+# --------------------
 # Submit button
-# ========================
+# --------------------
 if st.button("Submit") and name.strip() != "":
-    # Pick top 2 roles
+    # Pick top 2 roles with score > 0
     sorted_roles = sorted(role_scores.items(), key=lambda x: x[1], reverse=True)
-    top_roles = [r for r, s in sorted_roles[:2] if s > 0]
+    top_roles = [r for r, s in sorted_roles if s > 0][:2]
 
-    if len(top_roles) == 1:
+    if len(top_roles) == 0:
+        st.warning(f"⚠️ {name}, we couldn’t determine any roles for you.")
+    elif len(top_roles) == 1:
         st.success(f"🎉 {name}, your best-fit role is: **{top_roles[0]}**")
     else:
         st.success(f"🎉 {name}, your best-fit roles could be: **{top_roles[0]}** or **{top_roles[1]}**")
@@ -88,22 +103,24 @@ if st.button("Submit") and name.strip() != "":
     try:
         row = [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, ", ".join(top_roles)]
         for q in questions:
-            row.append(answers[q[0]])  # Add Y/N answers
-
+            row.append(answers[q[0]])
         sheet.append_row(row)
         st.info("✅ Your response was saved to Google Sheets!")
     except Exception as e:
         st.error(f"⚠️ Could not save to Google Sheets: {e}")
 
-# ========================
+# --------------------
 # Admin Dashboard
-# ========================
+# --------------------
 st.sidebar.subheader("🔐 Admin Login")
 password = st.sidebar.text_input("Enter admin password", type="password")
 
-if password == st.secrets["admin_password"]:  # Add admin_password in Streamlit Secrets
+# Safe access to admin password
+admin_password = st.secrets.get("admin_password")
+if admin_password is None:
+    st.sidebar.warning("⚠️ Admin password not set in Streamlit Secrets!")
+elif password == admin_password:
     st.sidebar.success("✅ Logged in as Admin")
-
     try:
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
