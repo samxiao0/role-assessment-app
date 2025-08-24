@@ -9,7 +9,19 @@ st.set_page_config(page_title="Role Assessment", page_icon="📝")
 st.title("📝 Student Association Role Assessment")
 st.write("Answer the questions to find your best fit role.")
 
+# ========================
+# Google Sheets Setup
+# ========================
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(
+    st.secrets["google_service_account"], scope
+)
+client = gspread.authorize(creds)
+sheet = client.open("Role_Assessment_Results").sheet1
+
+# ========================
 # Roles dictionary
+# ========================
 role_scores = {
     "Secretary": 0,
     "Joint Secretary": 0,
@@ -21,7 +33,9 @@ role_scores = {
     "Vice President": 0
 }
 
+# ========================
 # Questions list
+# ========================
 questions = [
     ("Do you enjoy writing meeting notes and official emails?", {"y": {"Secretary": 3}}, 3),
     ("Are you detail-oriented and good with documentation?", {"y": {"Joint Secretary": 3, "Secretary": 1}}, 3),
@@ -44,7 +58,9 @@ questions = [
     ("Do you see yourself as a leader who inspires others?", {"y": {"Vice President": 3}}, 3)
 ]
 
-# User input
+# ========================
+# User Input
+# ========================
 name = st.text_input("Enter your name:")
 
 answers = {}
@@ -55,23 +71,52 @@ for idx, (q, mapping, weight) in enumerate(questions, start=1):
         for role, score in mapping[ans.lower()].items():
             role_scores[role] += score * weight
 
-if st.button("Submit"):
+# ========================
+# Submit button
+# ========================
+if st.button("Submit") and name.strip() != "":
+    # Pick top 2 roles
+    sorted_roles = sorted(role_scores.items(), key=lambda x: x[1], reverse=True)
+    top_roles = [r for r, s in sorted_roles[:2] if s > 0]
 
-    # Pick best role
-    best_role = max(role_scores.items(), key=lambda x: x[1])[0]
-    st.success(f"🎉 {name}, your best-fit role is: **{best_role}**")
+    if len(top_roles) == 1:
+        st.success(f"🎉 {name}, your best-fit role is: **{top_roles[0]}**")
+    else:
+        st.success(f"🎉 {name}, your best-fit roles could be: **{top_roles[0]}** or **{top_roles[1]}**")
 
-    # Save result to Google Sheets
+    # Save result + answers to Google Sheets
     try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            st.secrets["google_service_account"], scope
-        )
-        client = gspread.authorize(creds)
+        row = [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, ", ".join(top_roles)]
+        for q in questions:
+            row.append(answers[q[0]])  # Add Y/N answers
 
-        sheet = client.open("Role_Assessment_Results").sheet1  # Make sure sheet exists
-        sheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, best_role])
-
+        sheet.append_row(row)
         st.info("✅ Your response was saved to Google Sheets!")
     except Exception as e:
         st.error(f"⚠️ Could not save to Google Sheets: {e}")
+
+# ========================
+# Admin Dashboard
+# ========================
+st.sidebar.subheader("🔐 Admin Login")
+password = st.sidebar.text_input("Enter admin password", type="password")
+
+if password == st.secrets["admin_password"]:  # Add admin_password in Streamlit Secrets
+    st.sidebar.success("✅ Logged in as Admin")
+
+    try:
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+
+        st.subheader("📊 Role Distribution")
+        if not df.empty and "Best Role" in df.columns:
+            role_counts = df["Best Role"].value_counts()
+            st.bar_chart(role_counts)
+
+        st.subheader("📋 All Responses")
+        st.dataframe(df)
+
+        st.download_button("📥 Download CSV", df.to_csv(index=False), "results.csv", "text/csv")
+
+    except Exception as e:
+        st.error(f"⚠️ Could not fetch admin data: {e}")
